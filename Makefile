@@ -8,7 +8,7 @@ BIN = $(MN)
 PYSRC = $(MININET) $(TEST) $(EXAMPLES) $(BIN)
 MNEXEC = mnexec
 MANPAGES = mn.1 mnexec.1
-P8IGN = E251,E201,E302,E202,E126,E127,E203,E226
+P8IGN = E251,E201,E302,E202,E126,E127,E203,E226,E402,W504,W503,E731
 PREFIX ?= /usr
 BINDIR ?= $(PREFIX)/bin
 MANDIR ?= $(PREFIX)/share/man/man1
@@ -47,7 +47,8 @@ slowtest: $(MININET)
 	mininet/examples/test/runner.py -v
 
 mnexec: mnexec.c $(MN) mininet/net.py
-	$(CC) $(CFLAGS) $(LDFLAGS) -DVERSION=\"`PYTHONPATH=. $(PYMN) --version`\" $< -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) \
+	-DVERSION=\"`PYTHONPATH=. $(PYMN) --version 2>&1`\" $< -o $@
 
 install-mnexec: $(MNEXEC)
 	install -D $(MNEXEC) $(BINDIR)/$(MNEXEC)
@@ -56,13 +57,16 @@ install-manpages: $(MANPAGES)
 	install -D -t $(MANDIR) $(MANPAGES)
 
 install: install-mnexec install-manpages
-	$(PYTHON) setup.py install
+#	This seems to work on all pip versions
+	$(PYTHON) -m pip uninstall -y mininet || true
+	$(PYTHON) -m pip install .
 
 develop: $(MNEXEC) $(MANPAGES)
 # 	Perhaps we should link these as well
 	install $(MNEXEC) $(BINDIR)
 	install $(MANPAGES) $(MANDIR)
-	$(PYTHON) setup.py develop
+	$(PYTHON) -m pip uninstall -y mininet || true
+	$(PYTHON) -m pip install -e . --no-binary :all:
 
 man: $(MANPAGES)
 
