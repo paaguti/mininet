@@ -36,25 +36,28 @@ class VLANHost( Host ):
     "Host connected to VLAN interface"
 
     # pylint: disable=arguments-differ
-    def config( self, vlan=100, **params ):
+    def config( self, **params ):
         """Configure VLANHost according to (optional) parameters:
            vlan: VLAN ID for default interface"""
 
+        vlan = params.pop('vlan',None)
+        assert vlan is not None, 'VLANHost without vlan in instantiation'
         r = super( VLANHost, self ).config( **params )
 
         intf = self.defaultIntf()
+        ip_info = params['ip']
+        new_intf = f'{intf}.{vlan}'
         # remove IP from default, "physical" interface
-        self.cmd( 'ifconfig %s inet 0' % intf )
+        self.cmd( f'ip address del {ip_info} dev {intf}')
         # create VLAN interface
-        self.cmd( 'vconfig add %s %d' % ( intf, vlan ) )
+        self.cmd(f'ip link add link {intf} name {new_intf} type vlan id {vlan}')
         # assign the host's IP to the VLAN interface
-        self.cmd( 'ifconfig %s.%d inet %s' % ( intf, vlan, params['ip'] ) )
-        # update the intf name and host's intf map
-        newName = '%s.%d' % ( intf, vlan )
+        self.cmd( f'ip address add {ip_info} dev {new_intf}')
+        self.cmd( f'ip link set up dev {new_intf}')
         # update the (Mininet) interface to refer to VLAN interface name
-        intf.name = newName
+        intf.name = new_intf
         # add VLAN interface to host's name to intf map
-        self.nameToIntf[ newName ] = intf
+        self.nameToIntf[ new_intf ] = intf
 
         return r
 
@@ -118,12 +121,7 @@ if __name__ == '__main__':
 
     setLogLevel( 'info' )
 
-    if not quietRun( 'which vconfig' ):
-        error( "Cannot find command 'vconfig'\nThe package",
-               "'vlan' is required in Ubuntu or Debian,",
-               "or 'vconfig' in Fedora\n" )
-        exit()
-
+    # Using the 'ip' command everywhere, there is no need for extra packages
     if len( sys.argv ) >= 2:
         exampleAllHosts( vlan=int( sys.argv[ 1 ] ) )
     else:
