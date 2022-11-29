@@ -545,17 +545,19 @@ function ryu {
             libxml2-dev libxslt1-dev zlib1g-dev
     fi
 
-    # fetch RYU from faucet: they have taken over Ryu code development
+    # fetch RYU from my github.
+    # It is the FAUCETSDN Ryu base with the right version for eventlet
+    # To compile on Python3 <= 3.10
     cd $BUILD_DIR/
-    git clone git://github.com/faucetsdn/ryu.git ryu
+    git clone https://github.com/paaguti/ryu.git ryu
     cd ryu
 
     # install ryu dependencies
     sudo -H ${PYTHON} -m pip install -r tools/pip-requires -r tools/optional-requires \
          -r tools/test-requires
-	# build it as user: cleanup will be easier
+	  # build it as user: cleanup will be easier
     ${PYTHON} setup.py build
-	# Install it: will create link to ryu-manager
+	  # Install it: will create link to ryu-manager
     sudo ${PYTHON} setup.py install
 
     # Add symbolic link to /usr/bin
