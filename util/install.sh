@@ -290,6 +290,9 @@ function of13 {
             git checkout ${OF13_SWITCH_REV}
             cd ..
         fi
+        cd ofsoftswitch13
+        patch -p1 < $MININET_DIR/mininet/util/openflow-patches/cpqd.patch
+        cd ..
     fi
 
     # Install netbee
