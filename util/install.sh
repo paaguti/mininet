@@ -308,8 +308,7 @@ function of13 {
     # Resume the install:
     cd $BUILD_DIR/ofsoftswitch13
     ./boot.sh
-    # Pull 1104
-    sed -i 's/^AM_CFLAGS = -Wstrict-prototypes -Werror$/AM_CFLAGS = -Wstrict-prototypes -Werror -Wno-error=stringop-truncation -Wno-error=format-truncation=/g' Makefile.am
+    patch -p1 <../openflow-patches/cpqd.patch
     ./configure
     make
     sudo make install
