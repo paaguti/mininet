@@ -208,6 +208,7 @@ function mn_deps {
                  net-tools \
                  ${PYPKG}-pexpect ${PYPKG}-tk
         # Install pip
+        echo "Trying to install pip3"
         $install ${PYPKG}-pip || $install ${PYPKG}-pip-whl
         if ! ${PYTHON} -m pip -V; then
             if [ $PYTHON_VERSION == 2 ]; then
@@ -291,10 +292,12 @@ function of13 {
             cd ..
         fi
         CPQD_PATCH=$MININET_DIR/mininet/util/openflow-patches/cpqd.patch
-        cd ofsoftswitch13
-        echo "Patching CPqD with ${CPQD_PATCH}"
-        patch -p1 < $CPQD_PATCH
-        cd ..
+        if [ -f $CPQD_PATCH ]; then
+          cd ofsoftswitch13
+          echo "Patching CPqD with ${CPQD_PATCH}"
+          patch -p1 < $CPQD_PATCH
+          cd ..
+        fi
     fi
 
     # Install netbee
@@ -313,7 +316,6 @@ function of13 {
     # Resume the install:
     cd $BUILD_DIR/ofsoftswitch13
     ./boot.sh
-    patch -p1 <../openflow-patches/cpqd.patch
     ./configure
     make
     sudo make install

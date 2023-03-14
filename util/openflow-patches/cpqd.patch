@@ -5,9 +5,9 @@ index 479d4aa..250f182 100644
 @@ -17,7 +17,7 @@ AM_CPPFLAGS = $(SSL_CFLAGS) -g
  AM_CPPFLAGS += -I $(top_srcdir)/include
  AM_CPPFLAGS += -I $(top_srcdir)/lib
- 
+
 -AM_CFLAGS = -Wstrict-prototypes -Werror
-+AM_CFLAGS = -Wno-error
- 
++AM_CFLAGS = -Wno-error -std=c++98
+
  if NDEBUG
  AM_CPPFLAGS += -DNDEBUG
