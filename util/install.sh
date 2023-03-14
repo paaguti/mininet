@@ -11,7 +11,7 @@ set -o nounset
 
 # Get directory containing mininet folder
 MININET_DIR="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd -P )"
-
+echo "Mininet installation directory is ${MININET_DIR}"
 # Set up build directory, which by default is the working directory
 #  unless the working directory is a subdirectory of mininet,
 #  in which case we use the directory containing mininet
@@ -290,8 +290,10 @@ function of13 {
             git checkout ${OF13_SWITCH_REV}
             cd ..
         fi
+        CPQD_PATCH=$MININET_DIR/util/openflow-patches/cpqd.patch
         cd ofsoftswitch13
-        patch -p1 < $MININET_DIR/mininet/util/openflow-patches/cpqd.patch
+        echo "Patching CPqD with ${CPQD_PATCH}"
+        patch -p1 <
         cd ..
     fi
 
