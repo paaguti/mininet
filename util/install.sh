@@ -290,7 +290,7 @@ function of13 {
             git checkout ${OF13_SWITCH_REV}
             cd ..
         fi
-        CPQD_PATCH=$MININET_DIR/util/openflow-patches/cpqd.patch
+        CPQD_PATCH=$MININET_DIR/mininet/util/openflow-patches/cpqd.patch
         cd ofsoftswitch13
         echo "Patching CPqD with ${CPQD_PATCH}"
         patch -p1 < $CPQD_PATCH
