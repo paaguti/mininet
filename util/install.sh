@@ -293,7 +293,7 @@ function of13 {
         CPQD_PATCH=$MININET_DIR/util/openflow-patches/cpqd.patch
         cd ofsoftswitch13
         echo "Patching CPqD with ${CPQD_PATCH}"
-        patch -p1 <
+        patch -p1 < $CPQD_PATCH
         cd ..
     fi
 
