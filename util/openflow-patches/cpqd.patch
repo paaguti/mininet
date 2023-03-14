@@ -1,13 +1,18 @@
 diff --git a/Makefile.am b/Makefile.am
-index 479d4aa..250f182 100644
+index 479d4aa..56a8279 100644
 --- a/Makefile.am
 +++ b/Makefile.am
-@@ -17,7 +17,7 @@ AM_CPPFLAGS = $(SSL_CFLAGS) -g
+@@ -13,11 +13,11 @@ else
+ distcheck-hook:
+ endif
+ 
+-AM_CPPFLAGS = $(SSL_CFLAGS) -g
++AM_CPPFLAGS = $(SSL_CFLAGS) -g -ansi
  AM_CPPFLAGS += -I $(top_srcdir)/include
  AM_CPPFLAGS += -I $(top_srcdir)/lib
-
+ 
 -AM_CFLAGS = -Wstrict-prototypes -Werror
-+AM_CFLAGS = -Wno-error -std=c++98
-
++AM_CFLAGS = -Wno-error -std=c99
+ 
  if NDEBUG
  AM_CPPFLAGS += -DNDEBUG
