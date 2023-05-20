@@ -21,7 +21,9 @@ from mininet.util import decode
 def sh( cmd ):
     "Print a command and send it to the shell"
     info( cmd + '\n' )
-    result = Popen( [ '/bin/sh', '-c', cmd ], stdout=PIPE ).communicate()[ 0 ]
+    p = Popen(  # pylint: disable=consider-using-with
+        [ '/bin/sh', '-c', cmd ], stdout=PIPE )
+    result = p.communicate()[ 0 ]
     return decode( result )
 
 def killprocs( pattern ):
@@ -51,9 +53,9 @@ class Cleanup( object ):
 
         info( "*** Removing excess controllers/ofprotocols/ofdatapaths/"
               "pings/noxes\n" )
-        zombies = ( 'controller ofprotocol ofdatapath ping nox_core'
-                    'lt-nox_core ovs-openflowd ovs-controller'
-                    'ovs-testcontroller udpbwtest mnexec ivs ryu-manager' )
+        zombies = ( 'controller ofprotocol ofdatapath ping nox_core '
+                    'lt-nox_core ovs-openflowd ovs-controller '
+                    'ovs-testcontroller udpbwtest mnexec ivs ryu-manager ' )
         # Note: real zombie processes can't actually be killed, since they
         # are already (un)dead. Then again,
         # you can't connect to them either, so they're mostly harmless.

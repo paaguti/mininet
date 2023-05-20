@@ -5,6 +5,7 @@ import os
 import re
 import sys
 
+from collections import namedtuple
 from fcntl import fcntl, F_GETFL, F_SETFL
 from functools import partial
 from os import O_NONBLOCK
@@ -46,6 +47,7 @@ if Python3:
         "Encode buffer for Python 3"
         return buf.encode( Encoding )
     getincrementaldecoder = codecs.getincrementaldecoder( Encoding )
+
 else:
     decode, encode = NullCodec.decode, NullCodec.encode
 
@@ -54,11 +56,16 @@ else:
         return NullCodec
 
 try:
-    # pylint: disable=import-error
-    oldpexpect = None
-    import pexpect as oldpexpect
+    import packaging.version  # replacement for distutils.version
+    StrictVersion = packaging.version.parse
+except ImportError:  # python2.7 lacks ModuleNotFoundError
+    import distutils.version  # pylint: disable=deprecated-module
+    StrictVersion = distutils.version.StrictVersion
 
-    # pylint: enable=import-error
+try:
+    oldpexpect = None
+    import pexpect as oldpexpect  # pylint: disable=import-error
+
     class Pexpect( object ):
         "Custom pexpect that is compatible with str"
         @staticmethod
@@ -97,11 +104,12 @@ def oldQuietRun( *cmd ):
         cmd = cmd[ 0 ]
         if isinstance( cmd, BaseString ):
             cmd = cmd.split( ' ' )
-    popen = Popen( cmd, stdout=PIPE, stderr=STDOUT )
+    out = ''
+    popen = Popen(  # pylint: disable=consider-using-with
+        cmd, stdout=PIPE, stderr=STDOUT )
     # We can't use Popen.communicate() because it uses
     # select(), which can't handle
     # high file descriptor numbers! poll() can, however.
-    out = ''
     readable = poll()
     readable.register( popen.stdout )
     while True:
@@ -118,6 +126,8 @@ def oldQuietRun( *cmd ):
 
 # This is a bit complicated, but it enables us to
 # monitor command output as it is happening
+
+CmdResult = namedtuple( 'CmdResult', 'out err ret' )
 
 # pylint: disable=too-many-branches,too-many-statements
 def errRun( *cmd, **kwargs ):
@@ -142,6 +152,7 @@ def errRun( *cmd, **kwargs ):
     elif isinstance( cmd, list ) and shell:
         cmd = " ".join( arg for arg in cmd )
     debug( '*** errRun:', cmd, '\n' )
+    # pylint: disable=consider-using-with
     popen = Popen( cmd, stdout=PIPE, stderr=stderr, shell=shell )
     # We use poll() because select() doesn't work with large fd numbers,
     # and thus communicate() doesn't work either
@@ -186,7 +197,8 @@ def errRun( *cmd, **kwargs ):
     if stderr == PIPE:
         popen.stderr.close()
     debug( out, err, returncode )
-    return out, err, returncode
+    return CmdResult( out, err, returncode )
+
 # pylint: enable=too-many-branches
 
 def errFail( *cmd, **kwargs ):
@@ -195,11 +207,11 @@ def errFail( *cmd, **kwargs ):
     if ret:
         raise Exception( "errFail: %s failed with return code %s: %s"
                          % ( cmd, ret, err ) )
-    return out, err, ret
+    return CmdResult( out, err, ret )
 
 def quietRun( cmd, **kwargs ):
     "Run a command and return merged stdout and stderr"
-    return errRun( cmd, stderr=STDOUT, **kwargs )[ 0 ]
+    return errRun( cmd, stderr=STDOUT, **kwargs ).out
 
 def which(cmd, **kwargs ):
     "Run a command and return merged stdout and stderr"
@@ -537,18 +549,25 @@ def fixLimits():
               "Mininet's performance may be affected.\n" )
     # pylint: enable=broad-except
 
-
-def mountCgroups():
-    "Make sure cgroups file system is mounted"
-    mounts = quietRun( 'grep cgroup /proc/mounts' )
-    cgdir = '/sys/fs/cgroup'
-    csdir = cgdir + '/cpuset'
-    if ('cgroup %s' % cgdir not in mounts and
-            'cgroups %s' % cgdir not in mounts):
-        raise Exception( "cgroups not mounted on " + cgdir )
-    if 'cpuset %s' % csdir not in mounts:
-        errRun( 'mkdir -p ' + csdir )
-        errRun( 'mount -t cgroup -ocpuset cpuset ' + csdir )
+def mountCgroups( cgcontrol='cpu cpuacct cpuset' ):
+    """Mount cgroupfs if needed and return cgroup version
+       cgcontrol: cgroup controllers to check ('cpu cpuacct cpuset')
+       Returns: 'cgroup' | 'cgroup2' """
+    # Try to read the cgroup controllers in cgcontrol
+    cglist = cgcontrol.split()
+    paths = ' '.join( '-g ' + c for c in cglist )
+    cmd = 'cgget -n %s /' % paths
+    result = errRun( cmd )
+    # If it failed, mount cgroupfs and retry
+    if result.ret or result.err or any(
+            c not in result.out for c in cglist ):
+        errFail( 'cgroupfs-mount' )
+        result = errRun( cmd )
+        errFail( cmd )
+    # cpu.cfs_period_us is used for cgroup but not cgroup2
+    if 'cpu.cfs_period_us' in result.out:
+        return 'cgroup'
+    return 'cgroup2'
 
 def natural( text ):
     "To sort sanely/alphabetically: sorted( l, key=natural )"
@@ -697,3 +716,26 @@ def waitListening( client=None, server='127.0.0.1', port=80, timeout=None ):
         time += .5
         result = runCmd( cmd )
     return True
+
+def unitScale( num, prefix='' ):
+    "Return unit scale prefix and factor"
+    scale = 'kMGTP'
+    if prefix:
+        pos = scale.lower().index( prefix.lower() )
+        return prefix, float( 10**(3*(pos+1)) )
+    num, prefix, factor = float( num ), '', 1
+    for i, c in enumerate(scale, start=1):
+        f = 10**(3*i)
+        if num < f:
+            break
+        prefix, factor = c, f
+    return prefix, float( factor )
+
+def fmtBps( bps, prefix='', fmt='%.1f %sbits/sec' ):
+    """Return bps as iperf-style formatted rate string
+       prefix: lock to specific prefix (k, M, G, ...)
+       fmt: default format string for bps, prefix"""
+    bps = float( bps )
+    prefix, factor = unitScale( bps, prefix )
+    bps /= factor
+    return fmt % ( bps, prefix)

@@ -98,18 +98,18 @@ from itertools import chain, groupby
 from math import ceil
 
 from mininet.cli import CLI
-from mininet.log import info, error, debug, output, warn
+from mininet.log import info, error, output, warn, debug
 from mininet.node import ( Node, Host, OVSKernelSwitch, DefaultController,
                            Controller )
 from mininet.nodelib import NAT
 from mininet.link import Link, Intf
 from mininet.util import ( quietRun, fixLimits, numCores, ensureRoot,
                            macColonHex, ipStr, ipParse, netParse, ipAdd,
-                           waitListening, BaseString )
+                           waitListening, BaseString, fmtBps )
 from mininet.term import cleanUpScreens, makeTerms
 
 # Mininet version: should be consistent with README and LICENSE
-VERSION = "2.3.1b1"
+VERSION = "2.3.1b4"
 
 class Mininet( object ):
     "Network emulation with hosts spawned in network namespaces."
@@ -201,7 +201,7 @@ class Mininet( object ):
             sleep( delay )
             time += delay
         warn( 'Timed out after %d seconds\n' % time )
-        for switch in remaining:
+        for switch in remaining.copy():
             if not switch.connected():
                 warn( 'Warning: %s is not connected to a controller\n'
                       % switch.name )
@@ -572,6 +572,10 @@ class Mininet( object ):
             info( controller.name + ' ' )
             controller.stop()
         info( '\n' )
+        # Unlimit cfs hosts to speed up shutdown
+        for h in self.hosts:
+            if hasattr( h, 'unlimit' ):
+                h.unlimit()
         if self.terms:
             info( '*** Stopping %i terms\n' % len( self.terms ) )
             self.stopXterms()
@@ -782,18 +786,26 @@ class Mininet( object ):
         return self.pingFull( hosts=hosts )
 
     @staticmethod
-    def _parseIperf( iperfOutput ):
-        """Parse iperf output and return bandwidth.
-           iperfOutput: string
-           returns: result string"""
-        r = r'([\d\.]+ \w+/sec)'
-        m = re.findall( r, iperfOutput )
-        if m:
-            return m[-1]
-        else:
-            # was: raise Exception(...)
-            error( 'could not parse iperf output: ' + iperfOutput )
-            return ''
+    def _iperfVals( iperfcsv, serverip ):
+        """Return iperf CSV as dict
+           iperfcsv: iperf -y C output
+           serverip: iperf server IP address
+        """
+        fields = 'date cip cport sip sport ipver interval sent rate'
+        lines = iperfcsv.strip().split('\n')
+        svals = {}
+        for line in lines:
+            if ',' not in line:
+                continue
+            line = line.split( ',' )
+            svals = dict( zip( fields.split(), line ) )
+            # Return client in cip:cport, server in sip:sport
+            if svals[ 'cip' ] == serverip:
+                svals[ 'cip' ], svals[ 'sip' ] = (
+                    svals[ 'sip' ], svals[ 'cip' ] )
+                svals[ 'cport' ], svals[ 'sport' ] = (
+                    svals[ 'sport' ], svals[ 'cport' ] )
+        return svals
 
     # XXX This should be cleaned up
 
@@ -803,7 +815,7 @@ class Mininet( object ):
            hosts: list of hosts; if None, uses first and last hosts
            l4Type: string, one of [ TCP, UDP ]
            udpBw: bandwidth target for UDP test
-           fmt: iperf format argument if any
+           fmt: scale/format argument (e.g. m/M for Mbps)
            seconds: iperf time to transmit
            port: iperf port
            returns: two-element array of [ server, client ] speeds
@@ -816,33 +828,36 @@ class Mininet( object ):
         output( '*** Iperf: testing', l4Type, 'bandwidth between',
                 client, 'and', server, '\n' )
         server.cmd( 'killall -9 iperf' )
-        iperfArgs = 'iperf -p %d ' % port
+        # Note: CSV mode
+        iperfArgs = 'iperf -y C -p %d ' % port
         bwArgs = ''
         if l4Type == 'UDP':
             iperfArgs += '-u '
             bwArgs = '-b ' + udpBw + ' '
-        elif l4Type != 'TCP':
-            raise Exception( 'Unexpected l4 type: %s' % l4Type )
-        if fmt:
-            iperfArgs += '-f %s ' % fmt
         server.sendCmd( iperfArgs + '-s' )
+        serverip = server.IP()
         if l4Type == 'TCP':
-            if not waitListening( client, server.IP(), port ):
+            if not waitListening( client, serverip, port ):
                 raise Exception( 'Could not connect to iperf on port %d'
                                  % port )
         cliout = client.cmd( iperfArgs + '-t %d -c ' % seconds +
                              server.IP() + ' ' + bwArgs )
-        debug( 'Client output: %s\n' % cliout )
-        servout = ''
-        # We want the last *b/sec from the iperf server output
-        # for TCP, there are two of them because of waitListening
-        count = 2 if l4Type == 'TCP' else 1
-        while len( re.findall( '/sec', servout ) ) < count:
-            servout += server.monitor( timeoutms=5000 )
+        cvals = self._iperfVals( cliout, serverip )
+        debug( 'iperf client output:', cliout, cvals )
+        serverout = ''
+        # Wait for output from the client session
+        while True:
+            serverout += server.monitor( timeoutms=5000 )
+            svals = self._iperfVals( serverout, serverip )
+            # Check for the client's source/output port
+            if ( svals and cvals[ 'sport' ] == svals[ 'sport' ]
+                 and int( svals[ 'rate' ] ) > 0 ):
+                break
+        debug( 'iperf server output:', serverout, svals )
         server.sendInt()
-        servout += server.waitOutput()
-        debug( 'Server output: %s\n' % servout )
-        result = [ self._parseIperf( servout ), self._parseIperf( cliout ) ]
+        serverout += server.waitOutput()
+        result = [ fmtBps( svals[ 'rate'], fmt ),
+                   fmtBps( cvals[ 'rate' ], fmt ) ]
         if l4Type == 'UDP':
             result.insert( 0, udpBw )
         output( '*** Results: %s\n' % result )

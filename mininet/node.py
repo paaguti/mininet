@@ -57,7 +57,6 @@ import pty
 import re
 import signal
 import select
-from distutils.version import StrictVersion
 from re import findall
 from subprocess import Popen, PIPE
 from sys import exit  # pylint: disable=redefined-builtin
@@ -66,7 +65,8 @@ from time import sleep
 from mininet.log import info, error, warn, debug
 from mininet.util import ( quietRun, errRun, errFail, moveIntf, isShellBuiltin,
                            numCores, retry, mountCgroups, BaseString, decode,
-                           encode, getincrementaldecoder, Python3, which )
+                           encode, getincrementaldecoder, Python3, which,
+                           StrictVersion )
 from mininet.moduledeps import moduleDeps, pathCheck, TUN
 from mininet.link import Link, Intf, TCIntf, OVSIntf
 
@@ -219,7 +219,7 @@ class Node( object ):
             params: parameters to Popen()"""
         # Leave this is as an instance method for now
         assert self
-        popen = Popen( cmd, **params )
+        popen = Popen( cmd, **params )  # pylint: disable=consider-using-with
         debug( '_popen', cmd, popen.pid )
         return popen
 
@@ -685,8 +685,21 @@ class CPULimitedHost( Host ):
 
     "CPU limited host"
 
-    def __init__( self, name, sched='cfs', **kwargs ):
-        Host.__init__( self, name, **kwargs )
+    def __init__( self, name, sched='cfs', **params ):
+        Host.__init__( self, name, **params )
+        # BL: Setting the correct period/quota is tricky, particularly
+        # for RT. RT allows very small quotas, but the overhead
+        # seems to be high. CFS has a mininimum quota of 1 ms, but
+        # still does better with larger period values.
+        self.period_us = params.get( 'period_us', 100000 )
+        self.sched = sched
+        self.cgroupsInited = False
+        self.cgroup, self.rtprio = None, None
+
+    def initCgroups( self ):
+        "Deferred cgroup initialization"
+        if self.cgroupsInited:
+            return
         # Initialize class if necessary
         if not CPULimitedHost.inited:
             CPULimitedHost.init()
@@ -696,32 +709,26 @@ class CPULimitedHost( Host ):
         # We don't add ourselves to a cpuset because you must
         # specify the cpu and memory placement first
         errFail( 'cgclassify -g cpu,cpuacct:/%s %s' % ( self.name, self.pid ) )
-        # BL: Setting the correct period/quota is tricky, particularly
-        # for RT. RT allows very small quotas, but the overhead
-        # seems to be high. CFS has a mininimum quota of 1 ms, but
-        # still does better with larger period values.
-        self.period_us = kwargs.get( 'period_us', 100000 )
-        self.sched = sched
-        if sched == 'rt':
+        if self.sched == 'rt':
             self.checkRtGroupSched()
             self.rtprio = 20
 
     def cgroupSet( self, param, value, resource='cpu' ):
         "Set a cgroup parameter and return its value"
-        cmd = 'cgset -r %s.%s=%s /%s' % (
-            resource, param, value, self.name )
-        quietRun( cmd )
-        nvalue = int( self.cgroupGet( param, resource ) )
-        if nvalue != value:
+        cmd = [ 'cgset', '-r', "%s.%s=%s" % (
+            resource, param, value), '/' + self.name ]
+        errFail( cmd )
+        nvalue = self.cgroupGet( param, resource )
+        if nvalue != str( value ):
             error( '*** error: cgroupSet: %s set to %s instead of %s\n'
                    % ( param, nvalue, value ) )
         return nvalue
 
     def cgroupGet( self, param, resource='cpu' ):
         "Return value of cgroup parameter"
-        cmd = 'cgget -r %s.%s /%s' % (
-            resource, param, self.name )
-        return int( quietRun( cmd ).split()[ -1 ] )
+        pname = '%s.%s' % ( resource, param )
+        cmd = 'cgget -n -r %s /%s' % ( pname, self.name )
+        return quietRun( cmd )[len(pname)+1:].strip()
 
     def cgroupDel( self ):
         "Clean up our cgroup"
@@ -788,6 +795,8 @@ class CPULimitedHost( Host ):
     def cfsInfo( self, f ):
         "Internal method: return parameters for CFS bandwidth"
         pstr, qstr = 'cfs_period_us', 'cfs_quota_us'
+        if self.cgversion == 'cgroup2':
+            pstr, qstr = 'max', ''
         # CFS uses wall clock time for period and CPU time for quota.
         quota = int( self.period_us * f * numCores() )
         period = self.period_us
@@ -797,7 +806,7 @@ class CPULimitedHost( Host ):
             period = int( quota / f / numCores() )
         # Reset to unlimited on negative quota
         if quota < 0:
-            quota = -1
+            quota = 'max' if self.cgversion == 'cgroup2' else -1
         return pstr, qstr, period, quota
 
     # BL comment:
@@ -827,12 +836,16 @@ class CPULimitedHost( Host ):
         else:
             return
         # Set cgroup's period and quota
-        setPeriod = self.cgroupSet( pstr, period )
-        setQuota = self.cgroupSet( qstr, quota )
+        if self.cgversion == 'cgroup':
+            setPeriod = self.cgroupSet( pstr, period )
+            setQuota = self.cgroupSet( qstr, quota )
+        else:
+            setQuota, setPeriod = self.cgroupSet(
+                    pstr, '%s %s' % (quota, period) ).split()
         if sched == 'rt':
             # Set RT priority if necessary
             sched = self.chrt()
-        info( '(%s %d/%dus) ' % ( sched, setQuota, setPeriod ) )
+        info( '(%s %s/%dus) ' % ( sched, setQuota, int( setPeriod ) ) )
 
     def setCPUs( self, cores, mems=0 ):
         "Specify (real) cores that our cgroup can run on"
@@ -857,6 +870,7 @@ class CPULimitedHost( Host ):
            cores: (real) core(s) this host can run on
            params: parameters for Node.config()"""
         r = Node.config( self, **params )
+        self.initCgroups()
         # Was considering cpu={'cpu': cpu , 'sched': sched}, but
         # that seems redundant
         self.setParam( r, 'setCPUFrac', cpu=cpu )
@@ -864,12 +878,18 @@ class CPULimitedHost( Host ):
         return r
 
     inited = False
+    cgversion = 'cgroup2'
 
     @classmethod
     def init( cls ):
         "Initialization for CPULimitedHost class"
-        mountCgroups()
+        cls.cgversion = mountCgroups()
         cls.inited = True
+
+    def unlimit( self ):
+        "Unlimit cpu for cfs"
+        if self.sched == 'cfs' and self.params.get( 'cpu', -1 ) != -1:
+            self.setCPUFrac( -1, sched=self.sched )
 
 
 # Some important things to note:
