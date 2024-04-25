@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 vlanhost.py: Host subclass that uses a VLAN tag for the default interface.
 
@@ -24,25 +24,34 @@ Usage (example uses VLAN ID=1000):
 
 """
 
-from sys import exit  # pylint: disable=redefined-builtin
-
+import sys
 from mininet.node import Host
 from mininet.topo import Topo
 from mininet.util import quietRun
 from mininet.log import error
 
+from mininet.net import Mininet
+from mininet.cli import CLI
+from mininet.topo import SingleSwitchTopo
+from mininet.log import setLogLevel
+
+from functools import partial
 
 class VLANHost( Host ):
     "Host connected to VLAN interface"
 
+    # Alternatively, one could define
+    # def config(self, vlan=None, **params)
+    # and avoid the
+    # vlan = params.pop('vlan' None)
     # pylint: disable=arguments-differ
     def config( self, **params ):
         """Configure VLANHost according to (optional) parameters:
            vlan: VLAN ID for default interface"""
 
-        vlan = params.pop('vlan',None)
+        vlan = params.pop('vlan', None)
         assert vlan is not None, 'VLANHost without vlan in instantiation'
-        r = super( VLANHost, self ).config( **params )
+        r = super().config(**params)
 
         intf = self.defaultIntf()
         ip_info = params['ip']
@@ -93,12 +102,12 @@ class VLANStarTopo( Topo ):
         for i in range( k ):
             vlan = vlanBase + i
             for j in range(n):
-                name = 'h%d-%d' % ( j+1, vlan )
-                h = self.addHost( name, cls=VLANHost, vlan=vlan )
-                self.addLink( h, s1 )
-        for j in range( n ):
-            h = self.addHost( 'h%d' % (j+1) )
-            self.addLink( h, s1 )
+                name = f'h{j+1}-{vlan}'
+                h = self.addHost(name, cls=VLANHost, vlan=vlan)
+                self.addLink(h, s1)
+        for j in range(n):
+            h = self.addHost(f'h{j+1}')
+            self.addLink(h, s1 )
 
 
 def exampleCustomTags():
@@ -111,14 +120,6 @@ def exampleCustomTags():
 
 
 if __name__ == '__main__':
-    import sys
-    from functools import partial
-
-    from mininet.net import Mininet
-    from mininet.cli import CLI
-    from mininet.topo import SingleSwitchTopo
-    from mininet.log import setLogLevel
-
     setLogLevel( 'info' )
 
     # Using the 'ip' command everywhere, there is no need for extra packages
